@@ -28,16 +28,17 @@ typedef struct {
 	CURL *curl;
 	str_t response;
 	int flush_response;
-} transport_head_t;
+} transport_session_t;
 
 typedef struct {
-	transport_head_t * (* const create)(const char *);
-	int (* const search)(transport_head_t *, const char *, const char *, const char *);
-	int (* const create_index)(transport_head_t *, const char *, const char *);
-	int (* const delete_index)(transport_head_t *, const char *);
-	int (* const index_document)(transport_head_t *, const char *, const char *, const char *, const char *);
+	transport_session_t * (* const create)(const char *);
+	int (* const search)(transport_session_t *, const char *, const char *, const char *);
+	int (* const create_index)(transport_session_t *, const char *, const char *);
+	int (* const delete_index)(transport_session_t *, const char *);
+	int (* const index_document)(transport_session_t *, const char *, const char *, const char *, const char *);
+	int (* const refresh)(transport_session_t *, const char *);
 	const char * (* const strerror)(int);
-	void (* const destroy)(transport_head_t *);
+	void (* const destroy)(transport_session_t *);
 } _transport_t;
 
 enum {
