@@ -8,10 +8,12 @@
 #define TRANSPORT_CALL_URL_LEN 255
 #define TRANSPORT_MAX_RESPONSE_BUFFER 65536
 #define TRANSPORT_MAX_HOSTS 2
+#define TRANSPORT_DEFAULT_TIMEOUT 1
+#define TRANSPORT_DEFAULT_FLUSH_REAPONSE 1
 
 typedef struct {
-	char * ptr;
-	size_t size;
+	char buffer[TRANSPORT_MAX_RESPONSE_BUFFER + 1];
+	size_t pos;
 } str_t;
 
 typedef struct {
@@ -25,11 +27,15 @@ typedef struct {
 	int timeout;
 	CURL *curl;
 	str_t response;
+	int flush_response;
 } transport_head_t;
 
 typedef struct {
 	transport_head_t * (* const create)(const char *);
 	int (* const search)(transport_head_t *, const char *, const char *, const char *);
+	int (* const create_index)(transport_head_t *, const char *, const char *);
+	int (* const delete_index)(transport_head_t *, const char *);
+	int (* const index_document)(transport_head_t *, const char *, const char *, const char *, const char *);
 	const char * (* const strerror)(int);
 	void (* const destroy)(transport_head_t *);
 } _transport_t;
