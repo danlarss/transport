@@ -89,8 +89,18 @@ transport_memorize_response(void *ptr, size_t size, size_t nmemb, void * userp) 
  	return realsize;
 }
 
+/**
+ * @brief Performs a http request using curl.
+ *
+ * @param head transport head struct
+ * @param path URL path
+ * @param trans_method HTTP request method (enum)
+ * @param payload HTTP request body
+ *
+ * @return 0 on success or transport error code.
+ */
 static int
-transport_call(transport_head_t * head, const char * url, int trans_method, const char * payload) {
+transport_call(transport_head_t * head, const char * path, int trans_method, const char * payload) {
 	char request_url[TRANSPORT_CALL_URL_LEN];
 	struct curl_slist *headers = NULL;
 	CURLcode res;
@@ -141,9 +151,7 @@ transport_call(transport_head_t * head, const char * url, int trans_method, cons
 	curl_easy_setopt(head->curl, CURLOPT_WRITEDATA, &head->response);
 
 	for (int i = 0; i < head->num_hosts; i++) {
-		snprintf(request_url, TRANSPORT_CALL_URL_LEN, "%s/%s", head->hosts[i].host, url);
-		fprintf(stderr, "url: %s\n", request_url);
-
+		snprintf(request_url, TRANSPORT_CALL_URL_LEN, "%s/%s", head->hosts[i].host, path);
 		curl_easy_setopt(head->curl, CURLOPT_PORT, head->hosts[i].port);
 		curl_easy_setopt(head->curl, CURLOPT_URL, request_url);
 		if ((res = curl_easy_perform(head->curl)) == CURLE_OK) {
@@ -157,7 +165,19 @@ transport_call(transport_head_t * head, const char * url, int trans_method, cons
 	return ret;
 }
 
-
+/**
+ * @brief Performs an elastic search.
+ *
+ * On a successfull search a pointer to the respose is stored in
+ * head->reponse.ptr and the size in head->repose.size.
+ *
+ * @param head transport head struct.
+ * @param index elastic index
+ * @param type elastic type
+ * @param payload HTTP post body
+ *
+ * @return 0 on success or transport error code.
+ */
 static int
 transport_search(transport_head_t * head, const char * index, const char * type, const char * payload) {
 	char path[TRANSPORT_CALL_URL_LEN];
@@ -167,6 +187,13 @@ transport_search(transport_head_t * head, const char * index, const char * type,
 	return transport_post(head, path, payload);
 }
 
+/**
+ * @brief Create and initialize a transport head struct.
+ *
+ * @param config Path to configuration file.
+ *
+ * @return a transport head struct.
+ */
 static transport_head_t *
 transport_create(const char * config) {
 
@@ -186,42 +213,36 @@ transport_create(const char * config) {
 	/* initialize curl. */
 	if ((head->curl = curl_easy_init()) == NULL) {
 		fprintf(stderr, "transport.create() failed: could not initialize curl.\n");
-		return NULL;
+		goto transport_create_error;
 	}
 
 	/* allocate initial memory for the response pointer (will be resized). */
 	if ((head->response.ptr = malloc(16)) == NULL) {
 		fprintf(stderr, "transport.create() failed: could not initialize response ptr.\n");
-		curl_easy_cleanup(head->curl);
-		config_destroy(&cfg);
-		return NULL;
+		goto transport_create_error;
 	}
 	head->response.size = 0;
 
 	/* load config. */
 	if (!config_read_file(&cfg, config)) {
 		fprintf(stderr, "transport.create() failed: %s:%d - %s\n", config_error_file(&cfg), config_error_line(&cfg), config_error_text(&cfg));
-		config_destroy(&cfg);
-    	return NULL;
+    	goto transport_create_error;
     }
 
 	/* lookup timeout from config and store the value in head.  */
 	if (!config_lookup_int(&cfg, "timeout", &head->timeout)) {
     	fprintf(stderr, "transport.create() failed: missing 'timeout' in configuration file.\n");
-		config_destroy(&cfg);
-    	return NULL;
+		goto transport_create_error;
     }
 
 	/* load hosts from config. */
 	if ((setting = config_lookup(&cfg, "hosts")) == NULL) {
-		config_destroy(&cfg);
-		return NULL;
+		goto transport_create_error;
 	}
 	host_count = config_setting_length(setting);
 	if (host_count == 0) {
     	fprintf(stderr, "transport.create() failed: missing 'hosts' in configuration file.\n");
-		config_destroy(&cfg);
-    	return NULL;		
+		goto transport_create_error;
 	}
 
 	/* store hosts in head struct. */
@@ -234,10 +255,35 @@ transport_create(const char * config) {
 		strncpy(head->hosts[head->num_hosts].host, h, TRANSPORT_HOST_LEN);
 		head->num_hosts++;
 	}
+
 	config_destroy(&cfg);
 	return head;
+
+transport_create_error:
+	/* cleanup */
+	if (head != NULL) {	
+		if (head->curl != NULL) {
+			curl_easy_cleanup(head->curl);
+		}
+		if (head->response.ptr != NULL) {
+			free(head->response.ptr);
+			head->response.ptr = NULL;
+		}
+		free(head);
+		head = NULL;
+	}
+	config_destroy(&cfg);
+	return NULL;
 }
 
+/**
+ * @brief Perform a HTTP GET request.
+ *
+ * @param head transport head struct.
+ * @param path URL path
+ *
+ * @return 0 on success or transport error code.
+ */
 static int
 transport_get(transport_head_t * head, const char * path) {
 	if (head == NULL) {
@@ -246,6 +292,15 @@ transport_get(transport_head_t * head, const char * path) {
 	return transport_call(head, path, TRANS_METHOD_GET, NULL);
 }
 
+/**
+ * @brief Perform a HTTP POST request.
+ *
+ * @param head transport head struct.
+ * @param path URL path
+ * @param payload HTTP POST body
+ *
+ * @return 0 on success or transport error code.
+ */
 static int
 transport_post(transport_head_t * head, const char * path, const char * payload) {
 	if (head == NULL) {
@@ -254,6 +309,15 @@ transport_post(transport_head_t * head, const char * path, const char * payload)
 	return transport_call(head, path, TRANS_METHOD_POST, payload);
 }
 
+/**
+ * @brief Perform a HTTP PUT request.
+ *
+ * @param head transport head struct.
+ * @param path URL path
+ * @param payload HTTP POST body
+ *
+ * @return 0 on success or transport error code.
+ */
 static int
 transport_put(transport_head_t * head, const char * path, const char * payload) {
 	if (head == NULL) {
@@ -262,6 +326,15 @@ transport_put(transport_head_t * head, const char * path, const char * payload) 
 	return transport_call(head, path, TRANS_METHOD_PUT, payload);
 }
 
+/**
+ * @brief Perform a HTTP DELETE request.
+ *
+ * @param head transport head struct.
+ * @param path URL path
+ * @param payload HTTP POST body
+ *
+ * @return 0 on success or transport error code.
+ */
 static int
 transport_delete(transport_head_t * head, const char * path, const char * payload) {
 	if (head == NULL) {
@@ -270,6 +343,11 @@ transport_delete(transport_head_t * head, const char * path, const char * payloa
 	return transport_call(head, path, TRANS_METHOD_DELETE, payload);
 }
 
+/**
+ * @brief Cleanup transport head struct.
+ *
+ * @param head transport head struct.
+ */
 static void
 transport_destroy(transport_head_t * head) {
 	if (head == NULL) {
@@ -280,9 +358,21 @@ transport_destroy(transport_head_t * head) {
 		head->response.ptr = NULL;
 	}
 	head->response.size = 0;
-	curl_easy_cleanup(head->curl);
+	if (head->curl != NULL) {
+		curl_easy_cleanup(head->curl);
+	}
+	free(head);
+	head = NULL;
 }
 
+/**
+ * @brief Returns a pointer to a string that describes the error 
+ * code passed in the argument error.
+ *
+ * @param error transport error code.
+ *
+ * @return pointer to error description string.
+ */
 static const char *
 transport_strerror(int error) {
 	/* handle curl errors 0 - 89 */
@@ -307,21 +397,3 @@ _transport_t const transport = {
 	transport_strerror,
 	transport_destroy
 };
-
-/* TEST
-int main(int argc, char **argv) {
-	fprintf(stdout, "Start\n");
-	int ret;
-
-	transport_head_t * head = transport_create("transport.cfg");
-	ret = transport.search(head, "foods", "food", "{\"query\":{\"filtered\":{\"query\":{\"match\":{\"name\":\"smör\"}}}}}");
-	if (ret != 0) {
-		fprintf(stderr, "transport.search() failed: %s\n", transport_strerror(ret));
-	} else {
-		fprintf(stdout, "Response: %s\n", head->response.ptr);
-	}
-	transport.destroy(head);
-	fprintf(stdout, "Done\n");
-	return 0;
-}
-*/
