@@ -141,7 +141,7 @@ int main(int argc, char **argv) {
          * query = "{\"query\":{\"filtered\":{\"query\":{\"match\":{\"name\":\"hello\"}}}}}";
 
     /* start a new transport session */
-    transport_session_t * session = transport_create("transport.cfg");
+    transport_session_t * session = transport.create("transport.cfg");
 
     /* create index "myindex" */
     transport.create_index(session, index, index_payload);

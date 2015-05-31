@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <libconfig.h>
+#include <time.h>
 #include "transport.h"
 
 static inline int transport_build_url(const char *, const char *, const char *, char *, size_t);
@@ -20,6 +21,20 @@ static int transport_delete_index(transport_session_t *, const char *);
 static int transport_index_document(transport_session_t *, const char *, const char *, const char *, const char *);
 static int transport_refresh(transport_session_t *, const char *);
 static void transport_destroy(transport_session_t *);
+static void transport_session_id(char *, size_t);
+
+static void 
+transport_session_id(char * str, size_t size) {
+    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVXYZ_";
+    if (size) {
+        --size;
+        for (size_t n = 0; n < size; n++) {
+            int key = rand() % (int) (sizeof charset - 1);
+            str[n] = charset[key];
+        }
+        str[size] = '\0';
+    }
+}
 
 /**
  * @brief Function to construct URL to the elastic host.
@@ -249,6 +264,9 @@ transport_create(const char * config) {
 
 	config_init(&cfg);
 
+	/* seeds the random number generator */
+	srand((unsigned int)time(NULL) * getpid());
+
 	/* allocate memory for session struct. */
 	if ((session = malloc(sizeof (transport_session_t))) == NULL) {
 		fprintf(stderr, "transport.create() failed: could not initialize transport session.\n");
@@ -263,6 +281,9 @@ transport_create(const char * config) {
 
 	session->response.buffer[0] = '\0';
 	session->response.pos = 0;
+
+	/* generate a kind of unique session id */
+	transport_session_id(&session->id, TRANSPORT_SESSION_ID_LEN); 
 
 	/* load config. */
 	if (!config_read_file(&cfg, config)) {

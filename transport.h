@@ -10,6 +10,7 @@
 #define TRANSPORT_MAX_HOSTS 2
 #define TRANSPORT_DEFAULT_TIMEOUT 1
 #define TRANSPORT_DEFAULT_FLUSH_REAPONSE 1
+#define TRANSPORT_SESSION_ID_LEN 32
 
 typedef struct {
 	char buffer[TRANSPORT_MAX_RESPONSE_BUFFER + 1];
@@ -22,6 +23,7 @@ typedef struct {
 } transport_host_t;
 
 typedef struct {
+	char id[TRANSPORT_SESSION_ID_LEN];
 	transport_host_t hosts[TRANSPORT_MAX_HOSTS];
 	size_t num_hosts;
 	int timeout;
