@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 #include <libconfig.h>
 #include "transport.h"
 
@@ -9,10 +10,10 @@ static size_t transport_memorize_response(void *, size_t, size_t, void *);
 static int transport_call(transport_head_t *, const char *, int, const char *);
 static int transport_search(transport_head_t *, const char *, const char *, const char *);
 static transport_head_t * transport_create(const char *);
-static int transport_get(transport_head_t *, const char *);
-static int transport_post(transport_head_t *, const char *, const char *);
-static int transport_put(transport_head_t *, const char *, const char *);
-static int transport_delete(transport_head_t *, const char *, const char *);
+static int transport_http_get(transport_head_t *, const char *);
+static int transport_http_post(transport_head_t *, const char *, const char *);
+static int transport_http_put(transport_head_t *, const char *, const char *);
+static int transport_http_delete(transport_head_t *, const char *, const char *);
 static void transport_destroy(transport_head_t *);
 static const char * transport_strerror(int);
 
@@ -35,13 +36,13 @@ transport_build_url(const char * index, const char * type, const char * action, 
 	}
 	if (type == NULL || strlen(type) == 0) {
 		if (action == NULL || strlen(action) == 0) {
-			written = snprintf(path, path_len, "%s/", index);	
+			written = snprintf(path, path_len, "%s", index);	
 		} else {
 			written = snprintf(path, path_len, "%s/%s", index, action);
 		}
 	} else {
 		if (action == NULL || strlen(action) == 0) {
-			written = snprintf(path, path_len, "%s/%s/", index, type);
+			written = snprintf(path, path_len, "%s/%s", index, type);
 		} else {
 			written = snprintf(path, path_len, "%s/%s/%s", index, type, action);
 		}
@@ -68,25 +69,29 @@ transport_memorize_response(void *ptr, size_t size, size_t nmemb, void * userp) 
 	}
 
 	size_t realsize = size * nmemb;
-  	str_t * mem = (str_t *) userp;
+	transport_head_t * head = (transport_head_t *) userp;
 
-	if ((nmemb + mem->size) > TRANSPORT_MAX_RESPONSE_BUFFER) {
-		/* response to large */
+	/* overwrite previous result if flush_response is set to 1 */
+	if (head->flush_response == 1) {
+		head->response.pos = 0;
+	}
+
+	/* check to see if this data exceeds the size of our buffer. If so, 
+	 * return 0 to indicate a problem to curl. */
+	if (head->response.pos + realsize > TRANSPORT_MAX_RESPONSE_BUFFER) {
 		return 0;
 	}
- 
- 	mem->ptr = realloc(mem->ptr, mem->size + realsize + 1);
-	if (mem->ptr == NULL) {
-		/* out of memory! */ 
-		return 0;
-	}
- 
- 	memcpy(&(mem->ptr[mem->size]), ptr, realsize);
- 	mem->size += realsize;
- 	/* the data must be zero terminated */
- 	mem->ptr[mem->size] = 0;
- 
- 	return realsize;
+		
+	/* copy the data from the curl buffer into our response buffer */
+	memcpy((void *)&head->response.buffer[head->response.pos], ptr, realsize);
+
+	/* update the response string pos */
+	head->response.pos += realsize;
+
+	/* the data must be zero terminated */
+	head->response.buffer[head->response.pos] = 0;
+	
+	return realsize;
 }
 
 /**
@@ -148,7 +153,7 @@ transport_call(transport_head_t * head, const char * path, int trans_method, con
 
 	curl_easy_setopt(head->curl, CURLOPT_FORBID_REUSE, 0);
 	curl_easy_setopt(head->curl, CURLOPT_WRITEFUNCTION, transport_memorize_response);
-	curl_easy_setopt(head->curl, CURLOPT_WRITEDATA, &head->response);
+	curl_easy_setopt(head->curl, CURLOPT_WRITEDATA, head);
 
 	for (int i = 0; i < head->num_hosts; i++) {
 		snprintf(request_url, TRANSPORT_CALL_URL_LEN, "%s/%s", head->hosts[i].host, path);
@@ -169,7 +174,7 @@ transport_call(transport_head_t * head, const char * path, int trans_method, con
  * @brief Performs an elastic search.
  *
  * On a successfull search a pointer to the respose is stored in
- * head->reponse.ptr and the size in head->repose.size.
+ * head->reponse.buffer and the size in head->response.pos.
  *
  * @param head transport head struct.
  * @param index elastic index
@@ -184,7 +189,34 @@ transport_search(transport_head_t * head, const char * index, const char * type,
 	if (!transport_build_url(index, type, "_search", path, TRANSPORT_CALL_URL_LEN)) {
 		return TRANS_ERROR_URL;
 	}
-	return transport_post(head, path, payload);
+	return transport_http_post(head, path, payload);
+}
+
+static int
+transport_create_index(transport_head_t * head, const char * index, const char * payload) {
+	char path[TRANSPORT_CALL_URL_LEN];
+	if (!transport_build_url(index, NULL, NULL, path, TRANSPORT_CALL_URL_LEN)) {
+		return TRANS_ERROR_URL;
+	}
+	return transport_http_put(head, path, payload);
+}
+
+static int
+transport_delete_index(transport_head_t * head, const char * index) {
+	char path[TRANSPORT_CALL_URL_LEN];
+	if (!transport_build_url(index, NULL, NULL, path, TRANSPORT_CALL_URL_LEN)) {
+		return TRANS_ERROR_URL;
+	}
+	return transport_http_delete(head, path, NULL);
+}
+
+static int
+transport_index_document(transport_head_t * head, const char * index, const char * type, const char * id, const char * payload) {
+	char path[TRANSPORT_CALL_URL_LEN];
+	if (!transport_build_url(index, type, id, path, TRANSPORT_CALL_URL_LEN)) {
+		return TRANS_ERROR_URL;
+	}
+	return transport_http_put(head, path, payload);
 }
 
 /**
@@ -216,24 +248,24 @@ transport_create(const char * config) {
 		goto transport_create_error;
 	}
 
-	/* allocate initial memory for the response pointer (will be resized). */
-	if ((head->response.ptr = malloc(16)) == NULL) {
-		fprintf(stderr, "transport.create() failed: could not initialize response ptr.\n");
-		goto transport_create_error;
-	}
-	head->response.size = 0;
+	head->response.buffer[0] = '\0';
+	head->response.pos = 0;
 
 	/* load config. */
 	if (!config_read_file(&cfg, config)) {
-		fprintf(stderr, "transport.create() failed: %s:%d - %s\n", config_error_file(&cfg), config_error_line(&cfg), config_error_text(&cfg));
-    	goto transport_create_error;
-    }
+		fprintf(stderr, "transport.create() failed: could not parse config file.");
+		goto transport_create_error;
+	}
 
 	/* lookup timeout from config and store the value in head.  */
 	if (!config_lookup_int(&cfg, "timeout", &head->timeout)) {
-    	fprintf(stderr, "transport.create() failed: missing 'timeout' in configuration file.\n");
-		goto transport_create_error;
-    }
+		head->timeout = TRANSPORT_DEFAULT_TIMEOUT;
+	}
+
+	/* lookup flush_response from config and store the value in head.  */
+	if (!config_lookup_bool(&cfg, "flush_response", &head->flush_response)) {		
+		head->flush_response = TRANSPORT_DEFAULT_FLUSH_REAPONSE;
+	}
 
 	/* load hosts from config. */
 	if ((setting = config_lookup(&cfg, "hosts")) == NULL) {
@@ -241,14 +273,14 @@ transport_create(const char * config) {
 	}
 	host_count = config_setting_length(setting);
 	if (host_count == 0) {
-    	fprintf(stderr, "transport.create() failed: missing 'hosts' in configuration file.\n");
+		fprintf(stderr, "transport.create() failed: missing 'hosts' in configuration file.\n");
 		goto transport_create_error;
 	}
 
 	/* store hosts in head struct. */
 	for (int i = 0; i < host_count && i < TRANSPORT_MAX_HOSTS; ++i) {
 		const char * h = NULL;
-    	config_setting_t * host = config_setting_get_elem(setting, i);
+		config_setting_t * host = config_setting_get_elem(setting, i);
 		if (!(config_setting_lookup_string(host, "host", &h) && config_setting_lookup_int(host, "port", &head->hosts[head->num_hosts].port))) {
 			continue;
 		}
@@ -264,10 +296,6 @@ transport_create_error:
 	if (head != NULL) {	
 		if (head->curl != NULL) {
 			curl_easy_cleanup(head->curl);
-		}
-		if (head->response.ptr != NULL) {
-			free(head->response.ptr);
-			head->response.ptr = NULL;
 		}
 		free(head);
 		head = NULL;
@@ -285,7 +313,7 @@ transport_create_error:
  * @return 0 on success or transport error code.
  */
 static int
-transport_get(transport_head_t * head, const char * path) {
+transport_http_get(transport_head_t * head, const char * path) {
 	if (head == NULL) {
 		return TRANS_ERROR_INPUT;
 	}
@@ -302,7 +330,7 @@ transport_get(transport_head_t * head, const char * path) {
  * @return 0 on success or transport error code.
  */
 static int
-transport_post(transport_head_t * head, const char * path, const char * payload) {
+transport_http_post(transport_head_t * head, const char * path, const char * payload) {
 	if (head == NULL) {
 		return TRANS_ERROR_INPUT;
 	}
@@ -319,7 +347,7 @@ transport_post(transport_head_t * head, const char * path, const char * payload)
  * @return 0 on success or transport error code.
  */
 static int
-transport_put(transport_head_t * head, const char * path, const char * payload) {
+transport_http_put(transport_head_t * head, const char * path, const char * payload) {
 	if (head == NULL) {
 		return TRANS_ERROR_INPUT;
 	}
@@ -336,7 +364,7 @@ transport_put(transport_head_t * head, const char * path, const char * payload) 
  * @return 0 on success or transport error code.
  */
 static int
-transport_delete(transport_head_t * head, const char * path, const char * payload) {
+transport_http_delete(transport_head_t * head, const char * path, const char * payload) {
 	if (head == NULL) {
 		return TRANS_ERROR_INPUT;
 	}
@@ -353,11 +381,7 @@ transport_destroy(transport_head_t * head) {
 	if (head == NULL) {
 		return;
 	}
-	if (head->response.ptr != NULL) {
-		free(head->response.ptr);
-		head->response.ptr = NULL;
-	}
-	head->response.size = 0;
+	head->response.pos = 0;
 	if (head->curl != NULL) {
 		curl_easy_cleanup(head->curl);
 	}
@@ -394,6 +418,9 @@ transport_strerror(int error) {
 _transport_t const transport = {
 	transport_create,
 	transport_search,
+	transport_create_index,
+	transport_delete_index,
+	transport_index_document,
 	transport_strerror,
 	transport_destroy
 };
