@@ -4,6 +4,9 @@
 #include <unistd.h>
 #include <libconfig.h>
 #include <time.h>
+#include <syslog.h>
+#include <stdarg.h>
+
 #include "transport.h"
 
 static inline int transport_build_url(const char *, const char *, const char *, char *, size_t);
@@ -22,6 +25,17 @@ static int transport_index_document(transport_session_t *, const char *, const c
 static int transport_refresh(transport_session_t *, const char *);
 static void transport_destroy(transport_session_t *);
 static void transport_session_id(char *, size_t);
+
+/**
+ * @brief Syslog wrapper.
+ */
+static inline void 
+transport_log(transport_session_t * session, int prio, const char * message, ...) {
+	va_list list;
+	va_start(list, message);
+	syslog(prio, message, list);
+	va_end(list);
+}
 
 /**
  * @brief Function to generate a string of random chars.
@@ -304,20 +318,24 @@ transport_create(const char * config) {
 	config_setting_t * setting;
 	int host_count;
 
+	/* */
 	config_init(&cfg);
 
-	/* seeds the random number generator */
+	/*  open or reopen a connection to syslog */
+	openlog("transport", LOG_PID | LOG_NDELAY, LOG_USER);
+	
+	/* seed the random number generator */
 	srand((unsigned int)time(NULL) * getpid());
 
 	/* allocate memory for session struct. */
 	if ((session = malloc(sizeof (transport_session_t))) == NULL) {
-		fprintf(stderr, "transport.create() failed: could not initialize transport session.\n");
+		transport_log(session, LOG_ERR, "create() failed: could not initialize session");
 		return NULL;
 	}
 
 	/* initialize curl. */
 	if ((session->curl = curl_easy_init()) == NULL) {
-		fprintf(stderr, "transport.create() failed: could not initialize curl.\n");
+		transport_log(session, LOG_ERR, "create() failed: could not initialize curl");
 		goto transport_create_error;
 	}
 
@@ -365,6 +383,7 @@ transport_create(const char * config) {
 	}
 
 	config_destroy(&cfg);
+	transport_log(session, LOG_INFO, "Transport session initialized #%s", session->id);
 	return session;
 
 transport_create_error:
@@ -388,7 +407,7 @@ transport_create_error:
  *
  * @return 0 on success or transport error code.
  */
-static int
+static inline int
 transport_http_get(transport_session_t * session, const char * path) {
 	if (session == NULL) {
 		return TRANS_ERROR_INPUT;
@@ -405,7 +424,7 @@ transport_http_get(transport_session_t * session, const char * path) {
  *
  * @return 0 on success or transport error code.
  */
-static int
+static inline int
 transport_http_post(transport_session_t * session, const char * path, const char * payload) {
 	if (session == NULL) {
 		return TRANS_ERROR_INPUT;
@@ -422,7 +441,7 @@ transport_http_post(transport_session_t * session, const char * path, const char
  *
  * @return 0 on success or transport error code.
  */
-static int
+static inline int
 transport_http_put(transport_session_t * session, const char * path, const char * payload) {
 	if (session == NULL) {
 		return TRANS_ERROR_INPUT;
@@ -439,7 +458,7 @@ transport_http_put(transport_session_t * session, const char * path, const char 
  *
  * @return 0 on success or transport error code.
  */
-static int
+static inline int
 transport_http_delete(transport_session_t * session, const char * path, const char * payload) {
 	if (session == NULL) {
 		return TRANS_ERROR_INPUT;
@@ -463,6 +482,9 @@ transport_destroy(transport_session_t * session) {
 	}
 	free(session);
 	session = NULL;
+
+	/* close syslog connection */
+	closelog();
 }
 
 /**
@@ -501,3 +523,40 @@ _transport_t const transport = {
 	transport_strerror,
 	transport_destroy
 };
+
+
+int main(int argc, char **argv) {
+  
+    char * index = "myindex",
+         * type = "mytype",
+         * index_payload = "{\"settings\": {\"number_of_shards\":1,\"number_of_replicas\":0},\"mappings\": {\"mytype\": {\"properties\": {\"name\":{\"type\": \"string\"}}}}}",
+         * query = "{\"query\":{\"filtered\":{\"query\":{\"match\":{\"name\":\"hello\"}}}}}";
+
+    
+    /* start a new transport session */
+    transport_session_t * session = transport.create("transport.cfg");
+
+    fprintf(stderr, "New session created #%s\n", session->id);
+
+    /* create index "myindex" */
+    transport.create_index(session, index, index_payload);
+
+    /* index two new documents */
+    transport.index_document(session, index, type, "id-1", "{\"name\":\"Hello world\"}");
+    transport.index_document(session, index, type, "id-2", "{\"name\":\"Hello nothing\"}");
+
+    /* explicitly refresh the new index */
+    transport.refresh(session, index);
+
+    /* search the new index */
+    transport.search(session, index, type, query);
+
+    /* do something with the result */
+    fprintf(stdout, "Response: %s\nLength: %zu\n", session->response.buffer, session->response.pos);
+   
+    /* drop the new index */
+    transport.delete_index(session, index);
+
+    transport.destroy(session);
+    return 0;
+}
