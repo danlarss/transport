@@ -23,9 +23,15 @@ static int transport_refresh(transport_session_t *, const char *);
 static void transport_destroy(transport_session_t *);
 static void transport_session_id(char *, size_t);
 
+/**
+ * @brief Function to generate a string of random chars.
+ *
+ * @param str pointer to string
+ * @param size size of string
+ */
 static void 
 transport_session_id(char * str, size_t size) {
-    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVXYZ_";
+    const char charset[] = "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVXYZ";
     if (size) {
         --size;
         for (size_t n = 0; n < size; n++) {
@@ -126,7 +132,7 @@ transport_memorize_response(void *ptr, size_t size, size_t nmemb, void * userp) 
 static int
 transport_call(transport_session_t * session, const char * path, int trans_method, const char * payload) {
 	char request_url[TRANSPORT_CALL_URL_LEN];
-	struct curl_slist *sessioners = NULL;
+	struct curl_slist *headers = NULL;
 	CURLcode res;
 	int ret = 0;
 
@@ -134,9 +140,9 @@ transport_call(transport_session_t * session, const char * path, int trans_metho
 		return TRANS_ERROR_INPUT;
 	}
 
-	sessioners = curl_slist_append(sessioners, "Accept: application/json");
-	sessioners = curl_slist_append(sessioners, "charsets: utf-8");
-	curl_easy_setopt(session->curl, CURLOPT_HTTPHEADER, sessioners);
+	headers = curl_slist_append(headers, "Accept: application/json");
+	headers = curl_slist_append(headers, "charsets: utf-8");
+	curl_easy_setopt(session->curl, CURLOPT_HTTPHEADER, headers);
 
 	curl_easy_setopt(session->curl, CURLOPT_USERAGENT, "libcurl-agent/1.0");
 	curl_easy_setopt(session->curl, CURLOPT_TIMEOUT, session->timeout);
@@ -198,7 +204,7 @@ transport_call(transport_session_t * session, const char * path, int trans_metho
  * @param session transport session struct.
  * @param index elastic index
  * @param type elastic type
- * @param payload HTTP post body
+ * @param payload HTTP POST body
  *
  * @return 0 on success or transport error code.
  */
@@ -211,6 +217,15 @@ transport_search(transport_session_t * session, const char * index, const char *
 	return transport_http_post(session, path, payload);
 }
 
+/**
+ * @brief Creates a new elastic index.
+ *
+ * @param session transport session struct.
+ * @param index elastic index
+ * @param payload HTTP PUT body
+ *
+ * @return 0 on success or transport error code.
+ */
 static int
 transport_create_index(transport_session_t * session, const char * index, const char * payload) {
 	char path[TRANSPORT_CALL_URL_LEN];
@@ -220,6 +235,14 @@ transport_create_index(transport_session_t * session, const char * index, const 
 	return transport_http_put(session, path, payload);
 }
 
+/**
+ * @brief Deletes an elastic index.
+ *
+ * @param session transport session struct.
+ * @param index elastic index
+ *
+ * @return 0 on success or transport error code.
+ */
 static int
 transport_delete_index(transport_session_t * session, const char * index) {
 	char path[TRANSPORT_CALL_URL_LEN];
@@ -229,6 +252,17 @@ transport_delete_index(transport_session_t * session, const char * index) {
 	return transport_http_delete(session, path, NULL);
 }
 
+/**
+ * @brief Stores a new document in elastic.
+ *
+ * @param session transport session struct.
+ * @param index elastic index
+ * @param type elastic type
+ * @param id document id
+ * @param payload HTTP PUT body
+ *
+ * @return 0 on success or transport error code.
+ */
 static int
 transport_index_document(transport_session_t * session, const char * index, const char * type, const char * id, const char * payload) {
 	char path[TRANSPORT_CALL_URL_LEN];
@@ -238,6 +272,14 @@ transport_index_document(transport_session_t * session, const char * index, cons
 	return transport_http_put(session, path, payload);
 }
 
+/**
+ * @brief Explicitly refreshes an elastic index.
+ *
+ * @param session transport session struct.
+ * @param index elastic index
+ *
+ * @return 0 on success or transport error code.
+ */
 static int
 transport_refresh(transport_session_t * session, const char * index) {
 	char path[TRANSPORT_CALL_URL_LEN];
@@ -283,7 +325,7 @@ transport_create(const char * config) {
 	session->response.pos = 0;
 
 	/* generate a kind of unique session id */
-	transport_session_id(&session->id, TRANSPORT_SESSION_ID_LEN); 
+	transport_session_id((char *)&session->id, TRANSPORT_SESSION_ID_LEN); 
 
 	/* load config. */
 	if (!config_read_file(&cfg, config)) {
