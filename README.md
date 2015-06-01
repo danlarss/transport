@@ -1,6 +1,6 @@
 # transport
 
-Transport is a simple helper library for communicating with elastic.
+Transport is a simple helper library for communicating with elastic search.
 
 ## Functions
 
