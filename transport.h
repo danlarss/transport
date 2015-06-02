@@ -1,8 +1,14 @@
 #ifndef _TRANSPORT_H_
 #define _TRANSPORT_H_
 
-#include "conf.h"
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <libconfig.h>
+#include <time.h>
 #include <curl/curl.h>
+#include "conf.h"
 
 #define TRANSPORT_HOST_LEN 32
 #define TRANSPORT_INDEX_LEN 32

@@ -8,8 +8,19 @@ configure_file (
 	)
 include_directories("${PROJECT_BINARY_DIR}")
 add_executable(Transport transport.c)
+
 find_package (curl)
 if (CURL_FOUND)
 	include_directories(${CURL_INCLUDE_DIRS})
 	target_link_libraries (Transport ${CURL_LIBRARIES})
 endif (CURL_FOUND)
+
+find_package (libconfig)
+if (CONFIG_FOUND)
+	include_directories(${CONFIG_INCLUDE_DIR})
+	target_link_libraries (Transport ${CONFIG_LIBRARY})
+endif (CONFIG_FOUND)
+
+install (TARGETS Transport DESTINATION bin)
+install (FILES transport.h DESTINATION include)
+install (FILES "${PROJECT_BINARY_DIR}/config.h" DESTINATION include)

@@ -497,11 +497,11 @@ _transport_t const transport = {
 	transport_create_index,
 	transport_delete_index,
 	transport_index_document,
+	transport_refresh,
 	transport_http_get,
 	transport_http_post,
 	transport_http_put,
 	transport_http_delete,
-	transport_refresh,
 	transport_strerror,
 	transport_destroy
 };
