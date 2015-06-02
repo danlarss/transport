@@ -35,5 +35,9 @@
 *.sublime-project
 *.sublime-workspace
 
-#build files
-build/*
+#CMake files
+CMakeCache.txt
+CMakeFiles
+Makefile
+cmake_install.cmake
+install_manifest.txt
