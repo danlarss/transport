@@ -498,6 +498,15 @@ _transport_t const transport = {
 	transport_delete_index,
 	transport_index_document,
 	transport_refresh,
+	transport_http_get,
+	transport_http_post,
+	transport_http_put,
+	transport_http_delete,
 	transport_strerror,
 	transport_destroy
 };
+
+int main(int argc, char **argv) {
+	fprintf(stdout,"%s Version %d.%d\n", argv[0], TRANSPORT_VERSION_MAJOR, TRANSPORT_VERSION_MINOR);
+	return 0;
+}
