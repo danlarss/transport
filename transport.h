@@ -1,6 +1,7 @@
 #ifndef _TRANSPORT_H_
 #define _TRANSPORT_H_
 
+#include "conf.h"
 #include <curl/curl.h>
 
 #define TRANSPORT_HOST_LEN 32
@@ -39,6 +40,10 @@ typedef struct {
 	int (* const delete_index)(transport_session_t *, const char *);
 	int (* const index_document)(transport_session_t *, const char *, const char *, const char *, const char *);
 	int (* const refresh)(transport_session_t *, const char *);
+	int (* const http_get)(transport_session_t *, const char *);
+	int (* const http_post)(transport_session_t *, const char *, const char *);
+	int (* const http_put)(transport_session_t *, const char *, const char *);
+	int (* const http_delete)(transport_session_t *, const char *, const char *);
 	const char * (* const strerror)(int);
 	void (* const destroy)(transport_session_t *);
 } _transport_t;
