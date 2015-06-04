@@ -1,9 +1,3 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <libconfig.h>
-#include <time.h>
 #include "transport.h"
 
 static inline int transport_build_url(const char *, const char *, const char *, char *, size_t);
@@ -306,7 +300,7 @@ transport_create(const char * config) {
 
 	config_init(&cfg);
 
-	/* seeds the random number generator */
+	/* seed the random number generator */
 	srand((unsigned int)time(NULL) * getpid());
 
 	/* allocate memory for session struct. */
@@ -321,6 +315,7 @@ transport_create(const char * config) {
 		goto transport_create_error;
 	}
 
+	/* reset response buffer */
 	session->response.buffer[0] = '\0';
 	session->response.pos = 0;
 
@@ -329,7 +324,7 @@ transport_create(const char * config) {
 
 	/* load config. */
 	if (!config_read_file(&cfg, config)) {
-		fprintf(stderr, "transport.create() failed: could not parse config file.");
+		fprintf(stderr, "transport.create() failed: could not parse config file.\n");
 		goto transport_create_error;
 	}
 
@@ -376,7 +371,9 @@ transport_create_error:
 		free(session);
 		session = NULL;
 	}
-	config_destroy(&cfg);
+	if (&cfg != NULL) {
+		config_destroy(&cfg);
+	}
 	return NULL;
 }
 

@@ -22,7 +22,11 @@ void transport_destroy(transport_session_t *);
 ```
 
 ## Install
-...
+
+In build dir
+```
+$ make && make install
+```
 
 ## Usage:
 *settings.cfg*
