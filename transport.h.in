@@ -8,66 +8,163 @@
 #include <libconfig.h>
 #include <time.h>
 #include <curl/curl.h>
+#include <yajl/yajl_tree.h>
+#include <yajl/yajl_gen.h>
 #include "conf.h"
 
 #define TRANSPORT_VERSION_MAJOR @TRANSPORT_VERSION_MAJOR@
 #define TRANSPORT_VERSION_MINOR @TRANSPORT_VERSION_MINOR@
+
+/* Macro to check if current session has any elastic search errors */
+#define TRANSPORT_HAS_ERROR(s) (((s) != NULL) && ((s)->type == TRANS_SESSION_TYPE_ERROR))
+/* Macro to fetch current error string */
+#define TRANSPORT_GET_ERROR(s) (TRANSPORT_HAS_ERROR(s) ? (s)->error.error : NULL)
+/* Macro to fetch current http status */
+#define TRANSPORT_GET_HTTP_STATUS(s) (TRANSPORT_HAS_ERROR(s) ? (s)->error.status : 200)
+
+/* Max length of elastic search host name */
 #define TRANSPORT_HOST_LEN 32
+/* Max length of elastic search index name */
 #define TRANSPORT_INDEX_LEN 32
+/* Max length of elastic search type name */
+#define TRANSPORT_TYPE_LEN 32
+/* Max length of elastic search document id */
+#define TRANSPORT_ID_LEN 16
+/* Max length of elastic search error message */
+#define TRANSPORT_ERROR_LEN 255
+/* Max length of elastic search rest call url (host/index/type/_action) */
 #define TRANSPORT_CALL_URL_LEN 255
-#define TRANSPORT_MAX_RESPONSE_BUFFER 65536
-#define TRANSPORT_MAX_HOSTS 2
-#define TRANSPORT_DEFAULT_TIMEOUT 1
-#define TRANSPORT_DEFAULT_FLUSH_REAPONSE 1
+/* Max length of internal session id */
 #define TRANSPORT_SESSION_ID_LEN 32
+/* Max length of elastic search total response */
+#define TRANSPORT_RESPONSE_LEN 65536
+/* Max length of each elastic search hits source  */
+#define TRANSPORT_SOURCE_LEN 2048
+/* Max number of hits from elastic search */
+#define TRANSPORT_MAX_NUM_HITS 100
+/* Max number of hosts allowed */
+#define TRANSPORT_MAX_HOSTS 2
+/* After how many seconds shall we try the next host */
+#define TRANSPORT_DEFAULT_TIMEOUT 1
+
+/* Response structs */
 
 typedef struct {
-	char buffer[TRANSPORT_MAX_RESPONSE_BUFFER + 1];
-	size_t pos;
+    int status;
+    char error[TRANSPORT_ERROR_LEN];
+} _error_r;
+
+typedef struct {
+    int total;
+    int successful;
+    int failed;
+} _shards_r;
+
+typedef struct {
+    int acknowledged;
+} _index_r;
+
+typedef struct {
+    _shards_r _shards;
+} _refresh_r;
+
+typedef struct {
+    char _index[TRANSPORT_INDEX_LEN + 1];
+    char _type[TRANSPORT_TYPE_LEN + 1];
+    char _id[TRANSPORT_ID_LEN + 1];
+    char _source[TRANSPORT_SOURCE_LEN + 1];
+    float _score;
+} _hit_r;
+
+typedef struct {
+    int total;
+    float max_score;
+    _hit_r hits[TRANSPORT_MAX_NUM_HITS];
+} _hits_r;
+
+typedef struct {
+    int took;
+    int timed_out;
+    _shards_r _shards;
+    _hits_r hits;
+} _search_r;
+
+
+typedef struct {
+    char _index[TRANSPORT_INDEX_LEN + 1];
+    char _type[TRANSPORT_TYPE_LEN + 1];
+    char _id[TRANSPORT_ID_LEN + 1];
+    int _version;
+    int created;
+} _index_document_r;
+
+typedef struct {
+    char buffer[TRANSPORT_RESPONSE_LEN + 1];
+    size_t pos;
 } str_t;
 
 typedef struct {
-	char host[TRANSPORT_HOST_LEN];
-	int port;
+    char host[TRANSPORT_HOST_LEN + 1];
+    int port;
 } transport_host_t;
 
 typedef struct {
-	char id[TRANSPORT_SESSION_ID_LEN];
-	transport_host_t hosts[TRANSPORT_MAX_HOSTS];
-	size_t num_hosts;
-	int timeout;
-	CURL *curl;
-	str_t response;
-	int flush_response;
+    char id[TRANSPORT_SESSION_ID_LEN + 1];
+    transport_host_t hosts[TRANSPORT_MAX_HOSTS];
+    size_t num_hosts;
+    int timeout;
+    CURL * curl;
+    str_t raw;
+    int type;
+    union {
+        _index_r create_index;
+        _index_r delete_index;
+        _index_document_r index_document;
+        _refresh_r refresh;
+        _error_r error;
+        _search_r search;
+    };
 } transport_session_t;
 
 typedef struct {
-	transport_session_t * (* const create)(const char *);
-	int (* const search)(transport_session_t *, const char *, const char *, const char *);
-	int (* const create_index)(transport_session_t *, const char *, const char *);
-	int (* const delete_index)(transport_session_t *, const char *);
-	int (* const index_document)(transport_session_t *, const char *, const char *, const char *, const char *);
-	int (* const refresh)(transport_session_t *, const char *);
-	int (* const http_get)(transport_session_t *, const char *);
-	int (* const http_post)(transport_session_t *, const char *, const char *);
-	int (* const http_put)(transport_session_t *, const char *, const char *);
-	int (* const http_delete)(transport_session_t *, const char *, const char *);
-	const char * (* const strerror)(int);
-	void (* const destroy)(transport_session_t *);
+    transport_session_t * (* const create)(const char *);
+    int (* const search)(transport_session_t *, const char *, const char *, const char *);
+    int (* const create_index)(transport_session_t *, const char *, const char *);
+    int (* const delete_index)(transport_session_t *, const char *);
+    int (* const index_document)(transport_session_t *, const char *, const char *, const char *, const char *);
+    int (* const refresh)(transport_session_t *, const char *);
+    int (* const http_get)(transport_session_t *, const char *);
+    int (* const http_post)(transport_session_t *, const char *, const char *);
+    int (* const http_put)(transport_session_t *, const char *, const char *);
+    int (* const http_delete)(transport_session_t *, const char *, const char *);
+    const char * (* const strerror)(int);
+    void (* const destroy)(transport_session_t *);
 } _transport_t;
 
 enum {
-	TRANS_METHOD_GET,
-	TRANS_METHOD_POST,
-	TRANS_METHOD_PUT,
-	TRANS_METHOD_DELETE,
-	TRANS_METHOD_MAX
+    TRANS_METHOD_GET,
+    TRANS_METHOD_POST,
+    TRANS_METHOD_PUT,
+    TRANS_METHOD_DELETE,
+    TRANS_METHOD_MAX
 };
 
 enum {
-	TRANS_ERROR_INPUT = 90,
-	TRANS_ERROR_URL,
-	TRANS_ERROR_CURL
+    TRANS_SESSION_TYPE_NONE,
+    TRANS_SESSION_TYPE_CREATE_INDEX,
+    TRANS_SESSION_TYPE_DELETE_INDEX,
+    TRANS_SESSION_TYPE_REFRESH,
+    TRANS_SESSION_TYPE_SEARCH,
+    TRANS_SESSION_TYPE_INDEX_DOCUMENT,
+    TRANS_SESSION_TYPE_ERROR
+};
+
+enum {
+    TRANS_ERROR_INPUT = 90,
+    TRANS_ERROR_URL,
+    TRANS_ERROR_CURL,
+    TRANS_ERROR_PARSE,
+    TRANS_ERROR_ELASTIC
 };
 
 extern _transport_t const transport;

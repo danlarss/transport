@@ -18,11 +18,18 @@ if (CURL_FOUND)
 	target_link_libraries (transport ${CURL_LIBRARIES})
 endif (CURL_FOUND)
 
+find_package (yajl)
+if (YAJL_FOUND)
+	include_directories(${YAJL_INCLUDE_DIR})
+	target_link_libraries (transport ${YAJL_LIBRARY})
+endif (YAJL_FOUND)
+
 find_package (libconfig)
 if (CONFIG_FOUND)
 	include_directories(${CONFIG_INCLUDE_DIR})
 	target_link_libraries (transport ${CONFIG_LIBRARY})
 endif (CONFIG_FOUND)
+
 
 install (TARGETS transport DESTINATION bin)
 install (FILES "${PROJECT_BINARY_DIR}/transport.h" DESTINATION include)
