@@ -299,11 +299,8 @@ transport_search(transport_session_t * session, const char * index, const char *
                         str_t str = {0};
                         transport_yajl_copy_tree(&str, h);
                         strncpy(session->search.hits.hits[i]._source, str.buffer, str.pos);
-                    } else {
-                        strncpy(session->search.hits.hits[i]._source, YAJL_GET_STRING(h), TRANSPORT_SOURCE_LEN);
+                        session->search.hits.hits[i]._source[str.pos] = '\0';
                     }
-                } else {
-                    strncpy(session->search.hits.hits[i]._source, "Not an object!", 16);
                 }
             }
         }
