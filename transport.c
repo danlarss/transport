@@ -804,7 +804,7 @@ transport_destroy(transport_session_t * session) {
  * code passed in the argument error.
  *
  * @param error transport error code.
- *
+ * @todo better error messages
  * @return pointer to error description string.
  */
 static const char *
@@ -819,6 +819,12 @@ transport_strerror(int error) {
             return "Input error";
         case TRANS_ERROR_URL:
             return "URL error";
+        case TRANS_ERROR_CURL:
+            return "cUrl error";
+        case TRANS_ERROR_PARSE:
+            return "Parse error";
+        case TRANS_ERROR_ELASTIC:
+            return "Elastic error";
         default:
             return "Unknown error";
         }

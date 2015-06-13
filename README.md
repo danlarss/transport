@@ -37,16 +37,16 @@ hosts = ({ host = "http://127.0.0.1";
            port = 9210; }
          );
 timeout = 1;
-flush_response = true;
 ```
 
 *test.c*
 ```c
 #include <stdio.h>
-#include "transport/transport.h"
+#include <transport.h>
 
 int main(int argc, char **argv) {
   
+    int res;
     char * index = "myindex",
          * type = "mytype",
          * index_payload = "{\"settings\": {\"number_of_shards\":1,\"number_of_replicas\":0},\"mappings\": {\"mytype\": {\"properties\": {\"name\":{\"type\": \"string\"}}}}}",
@@ -54,26 +54,46 @@ int main(int argc, char **argv) {
 
     /* start a new transport session */
     transport_session_t * session = transport.create("settings.cfg");
+    if (!session) {
+        return 1;
+    }
 
     /* create index "myindex" */
-    transport.create_index(session, index, index_payload);
+    if ((res = transport.create_index(session, index, index_payload)) != 0) {
+        fprintf(stderr, "%s: \"%s\"\n", transport.strerror(res), TRANSPORT_GET_ERROR(session));
+    }
 
     /* index two new documents */
-    transport.index_document(session, index, type, "id-1", "{\"name\":\"Hello world\"}");
-    transport.index_document(session, index, type, "id-2", "{\"name\":\"Hello nothing\"}");
+    if ((res = transport.index_document(session, index, type, "id-1", "{\"name\":\"Hello world\"}")) != 0) {
+        fprintf(stderr, "%s: \"%s\"\n", transport.strerror(res), TRANSPORT_GET_ERROR(session));
+    }
+    if ((res = transport.index_document(session, index, type, "id-2", "{\"name\":\"Hello nothing\"}")) != 0) {
+        fprintf(stderr, "%s: \"%s\"\n", transport.strerror(res), TRANSPORT_GET_ERROR(session));
+    }
 
     /* explicitly refresh the new index */
-    transport.refresh(session, index);
+    if ((res = transport.refresh(session, index)) != 0) {
+        fprintf(stderr, "%s: \"%s\"\n", transport.strerror(res), TRANSPORT_GET_ERROR(session));
+    }
 
-    /* search the new index */
-    transport.search(session, index, type, query);
+    /* search the index */
+    if ((res = transport.search(session, index, type, query)) != 0) {
+        fprintf(stderr, "%s: \"%s\"\n", transport.strerror(res), TRANSPORT_GET_ERROR(session));
+    } else {
+        /* print out the raw result */
+        fprintf(stdout, "%s\n", session->raw.buffer);
+       
+        /* print out individual hits */
+        fprintf(stdout, "Found: %d results\n", session->search.hits.total);
+        for (int i = 0; i < session->search.hits.total; i++) {
+            fprintf(stdout, "%s: %s\n", session->search.hits.hits[i]._id, session->search.hits.hits[i]._source);
+        }
+    }
 
-    /* do something with the result */
-    fprintf(stdout, "Response: %s\nLength: %zu\n", session->response.buffer, session->response.pos);
-   
     /* drop the new index */
     transport.delete_index(session, index);
 
+    /* cleanup */
     transport.destroy(session);
     return 0;
 }
